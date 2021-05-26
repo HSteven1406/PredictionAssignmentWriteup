@@ -1,0 +1,122 @@
+---
+title: "Prediciton Assignment Writeup"
+author: "Steven Hanssens"
+date: "24/05/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Summary
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, our goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: [http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/har](http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/har) (see the section on the Weight Lifting Exercise Dataset).
+
+## Downloading and cleaning data
+```{r, show=F}
+library(caret)
+
+```
+
+If necessary, we download the data and read it.
+
+```{r, cache=T}
+trainUrl <- 'https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv'
+testUrl <- 'https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv'
+trainFile <- paste(getwd(),'/data/pml-training.csv',sep='')
+testFile <- paste(getwd(),'/data/pml-testing.csv',sep='')
+
+if (!dir.exists('data')){
+  dir.create("data")
+}
+if (!file.exists(trainFile)){
+  download.file(trainUrl,trainFile)
+}
+if (!file.exists(testFile)){
+  download.file(testUrl,testFile)
+}
+
+DataTrain <- read.csv(trainFile, na.strings=c("NA","#DIV/0!",""))
+DataTest <- read.csv(testFile, na.strings=c("NA","#DIV/0!",""))
+c(dim(DataTrain),dim(DataTest))
+```
+
+Before splitting DataTrain into a training set and a validation set (for cross-validation), we remove the first seven columns which are just here to give some information about the user and the time of the activity as it isn't relevant for our goal (i.e. predict the manner in which subjects did the exercise).
+
+```{r}
+TrShort <- DataTrain[,-c(1:7)]
+TeShort <- DataTest[,-c(1:7)]
+```
+
+Let's split DataTrain now.
+
+```{r}
+set.seed(seed=1406)
+
+TrainPart <- createDataPartition(TrShort$classe,p=0.7,list=F)
+TrainingSet <- TrShort[TrainPart,]
+ValidationSet <- TrShort[-TrainPart,]
+```
+
+Some columns are full of NA's or doesn't help with prediction (low variance or small number of unique values). We clean the training set, the validation set and the test set by checking in training set which columns to remove.
+
+```{r, cache=T}
+TrainingSetClean <- TrainingSet[,colSums(is.na(TrainingSet))==0]
+ValidationSetClean <- ValidationSet[,colSums(is.na(TrainingSet))==0]
+TeShort <- TeShort[,colSums(is.na(TrainingSet))==0]
+
+nzvCols <- nearZeroVar(TrainingSetClean,saveMetrics = T)
+TrainingSetClean <- TrainingSetClean[,nzvCols$nzv==FALSE]
+ValidationSetClean <- ValidationSetClean[,nzvCols$nzv==FALSE]
+TeShort <- TeShort[,nzvCols$nzv==FALSE]
+```
+
+
+## Model Development
+### Training
+We train three models using three differents methods : random forest, gradiant boosted machine and linear discriminant analysis.
+
+```{r, cache=TRUE}
+
+RFmod <- train(classe~., data=TrainingSetClean, method='rf',trControl=trainControl(method='cv',5),ntree=251)
+GBMmod <- train(classe~., data=TrainingSetClean,
+                method='gbm',trControl=trainControl(method='cv',5),verbose=FALSE)
+LDAmod <- train(classe~., data=TrainingSetClean, method="lda")
+```
+
+### Random Forest
+We predict values using the random forest on the validation set to know the accuracy.
+
+```{r}
+predRF <- predict(RFmod, ValidationSetClean)
+conf_RF <- confusionMatrix(as.factor(ValidationSetClean$classe), predRF)
+print(conf_RF[c(2,3)])
+```
+We can see our Random Forest model is rather good (0.9915038 accuracy).
+
+### Gradiant Boosted Machine 
+Now, we predict using our GBM model.
+```{r}
+predGBM <- predict(GBMmod, ValidationSetClean)
+conf_GMB <- confusionMatrix(as.factor(ValidationSetClean$classe),predGBM)
+print(conf_GMB[c(2,3)])
+```
+This time, the accuracy is a bit lower (0.9621071).
+
+### Linear Discriminant Analysis
+Let's do the same for the LDA model.
+```{r}
+predLDA <- predict(LDAmod,ValidationSetClean)
+conf_LDA <- confusionMatrix(as.factor(ValidationSetClean$classe),predLDA)
+print(conf_LDA[c(2,3)])
+```
+Again, we lost accuracy and score 0.700085.
+
+## Prediction
+It seems that our best model is the Random Forest model. We will use it to predict the value for the test set.
+
+```{r}
+TestPred <- predict(RFmod, TeShort)
+print(TestPred)
+```
+
